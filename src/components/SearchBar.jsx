@@ -14,7 +14,7 @@ const ICONS = {
 };
 
 function SearchBar({ onResults }) {
-  const [query, setQuery] = useState("Gun gun guna");
+  const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   // New state to track if a search has been performed
@@ -28,7 +28,7 @@ function SearchBar({ onResults }) {
     setError(null);
     setHasSearched(true); // Mark that a search has occurred
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/search?q=${encodeURIComponent(query)}`);
+      const res = await fetch(`${__API_BASE_URL__}/api/search?q=${encodeURIComponent(query)}`);
       if (!res.ok) throw new Error("Search failed. Please try again.");
       const data = await res.json();
       onResults(data.results || []);
