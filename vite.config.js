@@ -6,11 +6,11 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': 'https://syncplayer-server.onrender.com/',
-    }
+      '/api': 'https://syncplayer-server.onrender.com',
+    },
   },
   define: {
     // __API_BASE_URL__: JSON.stringify("http://localhost:5000"),
-    __API_BASE_URL__: JSON.stringify("https://syncplayer-server.onrender.com/"),
+    __API_BASE_URL__: JSON.stringify("https://syncplayer-server.onrender.com"),
   },
 })
