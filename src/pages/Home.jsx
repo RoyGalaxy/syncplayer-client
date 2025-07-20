@@ -32,7 +32,6 @@ function Home() {
 
   const handlePlay = (track) => {
     if (!room || !track) return;
-    console.log(track, socket)
     socket.emit("play", {
       roomId: room.id,
       track,
