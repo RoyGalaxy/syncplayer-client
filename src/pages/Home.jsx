@@ -8,6 +8,7 @@ import { io } from "socket.io-client";
 function Home() {
   const [tracks, setTracks] = useState([]);
   const [currentTrack, setCurrentTrack] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [room, setRoomState] = useState(null);
   const [user, setUserState] = useState("");
   const [socket, setSocket] = useState(null);
@@ -32,6 +33,7 @@ function Home() {
 
   const handlePlay = (track) => {
     if (!room || !track) return;
+    setLoading(true)
     socket.emit("play", {
       roomId: room.id,
       track,
@@ -107,7 +109,7 @@ function Home() {
         setUser={setUser}
       />}
       <div className="fixed bottom-0 left-0 w-full bg-gray-800 shadow-lg p-4">
-        <Player track={currentTrack} setCurrentTrack={setCurrentTrack} socket={socket} room={room} user={user} />
+        <Player track={currentTrack} setCurrentTrack={setCurrentTrack} socket={socket} room={room} user={user} loading={loading} setLoading={setLoading} />
       </div>
     </div>
   );

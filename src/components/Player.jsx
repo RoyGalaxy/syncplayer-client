@@ -19,11 +19,12 @@ const ICONS = {
   PAUSE: "M6 19h4V5H6v14zm8-14v14h4V5h-4z",
   SKIP_NEXT: "M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z",
   REPEAT: "M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z",
-  CHEVRON_UP: "M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z"
+  CHEVRON_UP: "M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z",
+  LOADING: "M12 2a10 10 0 1 0 10 10h-2a8 8 0 1 1-8-8V2z"
 };
 
 
-function Player({ track, setCurrentTrack, socket, room, user }) {
+function Player({ track, setCurrentTrack, socket, room, user, loading, setLoading }) {
   const playerRef = useRef(null);
   const [isSeeking, setIsSeeking] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -37,6 +38,7 @@ function Player({ track, setCurrentTrack, socket, room, user }) {
   // Emit play event
   const handlePlay = () => {
     if (!room || !track) return;
+    setLoading(true)
     socket.emit("play", {
       roomId: room.id,
       track,
@@ -61,7 +63,7 @@ function Player({ track, setCurrentTrack, socket, room, user }) {
   const handleSeekMouseDown = () => {
     setIsSeeking(true);
   };
-  
+
   // As the user drags the slider
   const handleSeekChange = (newTime) => {
     // Only update the visual position of the slider
@@ -70,12 +72,12 @@ function Player({ track, setCurrentTrack, socket, room, user }) {
 
   const handleSeekMouseUp = (newTime) => {
     if (!room || !track) return;
-    
+
     // Add this check to prevent the error
     if (playerRef.current) {
       playerRef.current.currentTime = Number.parseFloat(newTime);
     }
-    
+
     socket.emit("seek", {
       roomId: room.id,
       time: newTime,
@@ -88,7 +90,7 @@ function Player({ track, setCurrentTrack, socket, room, user }) {
     if (!player || isSeeking) return;
 
     setPlayedSeconds(player.currentTime)
-    
+
   }
 
   const handleDurationChange = () => {
@@ -136,12 +138,12 @@ function Player({ track, setCurrentTrack, socket, room, user }) {
         setPlaying(isPlaying);
       }
     };
-  
+
     socket.on("play", onPlay);
     socket.on("pause", onPause);
     socket.on("seek", onSeek);
     socket.on("syncTick", onSyncTick);
-  
+
     return () => {
       socket.off("play", onPlay);
       socket.off("pause", onPause);
@@ -153,7 +155,7 @@ function Player({ track, setCurrentTrack, socket, room, user }) {
   // Sync player with state
   useEffect(() => {
     // This handles seeks from the server
-    if (internalSeek && playerRef.current ) {
+    if (internalSeek && playerRef.current) {
       playerRef.current.currentTime = Number.parseFloat(playedSeconds)
       setInternalSeek(false);
     }
@@ -173,7 +175,7 @@ function Player({ track, setCurrentTrack, socket, room, user }) {
     const sec = Math.floor(s % 60);
     return `${m}:${sec.toString().padStart(2, '0')}`;
   };
-  
+
   if (!track) {
     return null;
   }
@@ -186,6 +188,7 @@ function Player({ track, setCurrentTrack, socket, room, user }) {
       <ReactPlayer
         ref={playerRef}
         src={track.id ? `https://www.youtube.com/watch?v=${track.id}` : ""}
+        onPlaying={() => setLoading(false)}
         playing={playing}
         controls={false}
         width={0}
@@ -215,7 +218,11 @@ function Player({ track, setCurrentTrack, socket, room, user }) {
             <p className="text-xs text-gray-400 truncate">{track.artist}</p>
           </div>
           <button onClick={(e) => { e.stopPropagation(); playing ? handlePause() : handlePlay(); }} className="p-2 rounded-full hover:bg-gray-700">
-            <Icon path={playing ? ICONS.PAUSE : ICONS.PLAY} className="w-5 h-5" />
+            {loading ? (
+              <div className="absolute right-4 animate-spin">
+                <div className="w-6 h-6 border-2 border-transparent border-t-green-400 rounded-full"></div>
+              </div>
+            ) : <Icon path={playing ? ICONS.PAUSE : ICONS.PLAY} className="w-5 h-5" />}
           </button>
           <button onClick={() => setMinimized(false)} className="p-2 rounded-full hover:bg-gray-700">
             <Icon path={ICONS.CHEVRON_UP} className="w-5 h-5" />
@@ -230,7 +237,7 @@ function Player({ track, setCurrentTrack, socket, room, user }) {
                 <Icon path={ICONS.CHEVRON_DOWN} />
               </button>
               <div className="text-center">
-                <p className="text-xs uppercase tracking-wider text-gray-400">Played by {lastPlayer}</p>
+                <p className="text-xs uppercase tracking-wider text-gray-400">Played {loading} by {lastPlayer}</p>
                 <p className="font-bold text-sm">{room?.name || "SyncPlayer"}</p>
               </div>
               <button className="p-2 rounded-full hover:bg-white/10">
@@ -240,10 +247,10 @@ function Player({ track, setCurrentTrack, socket, room, user }) {
 
             {/* Album Art */}
             <div className="flex-grow flex items-center justify-center my-4">
-              <img 
-                  src={track.thumbnail} 
-                  alt={track.title}
-                  className="w-full aspect-square rounded-lg shadow-2xl object-cover"
+              <img
+                src={track.thumbnail}
+                alt={track.title}
+                className="w-full aspect-square rounded-lg shadow-2xl object-cover"
               />
             </div>
 
@@ -272,7 +279,7 @@ function Player({ track, setCurrentTrack, socket, room, user }) {
                 onTouchEnd={(e) => handleSeekMouseUp(Number(e.target.value))}
                 className="w-full h-1 bg-gray-700 rounded-full appearance-none cursor-pointer accent-white"
                 style={{
-                    background: `linear-gradient(to right, white ${ (safePlayedSeconds / safeDuration) * 100 }%, rgb(55 65 81) ${ (safePlayedSeconds / safeDuration) * 100 }%)`
+                  background: `linear-gradient(to right, white ${(safePlayedSeconds / safeDuration) * 100}%, rgb(55 65 81) ${(safePlayedSeconds / safeDuration) * 100}%)`
                 }}
               />
               <div className="flex justify-between text-xs text-gray-400 mt-1">
@@ -289,11 +296,15 @@ function Player({ track, setCurrentTrack, socket, room, user }) {
               <button className="p-2 rounded-full hover:bg-white/10" title="Previous (Not Implemented)">
                 <Icon path={ICONS.SKIP_PREVIOUS} className="w-10 h-10" />
               </button>
-              <button 
-                onClick={playing ? handlePause : handlePlay} 
+              <button
+                onClick={playing ? handlePause : handlePlay}
                 className="bg-white text-black rounded-full p-4 mx-2 shadow-lg hover:scale-105 transition-transform"
               >
-                <Icon path={playing ? ICONS.PAUSE : ICONS.PLAY} className="w-10 h-10" />
+                {loading ? (
+                  <div className="animate-spin">
+                    <div className="w-6 h-6 border-4 border-transparent border-t-green-400 border-r-green-500 rounded-full"></div>
+                  </div>
+                ) : <Icon path={playing ? ICONS.PAUSE : ICONS.PLAY} className="w-8 h-8" />}
               </button>
               <button onClick={handleNext} className="p-2 rounded-full hover:bg-white/10" title="Next">
                 <Icon path={ICONS.SKIP_NEXT} className="w-10 h-10" />
@@ -305,7 +316,7 @@ function Player({ track, setCurrentTrack, socket, room, user }) {
 
             {/* Bottom Bar (placeholder) */}
             <footer className="w-full flex justify-center pb-4">
-                <div className="w-10 h-1 bg-gray-500 rounded-full"></div>
+              <div className="w-10 h-1 bg-gray-500 rounded-full"></div>
             </footer>
           </div>
         </div>
