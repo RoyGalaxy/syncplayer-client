@@ -1,14 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import ReactPlayer from "react-player";
+import { useRoomStore } from "../store/room";// Assuming stores are in a central file or barrel
+import { useUIStore } from "../store/ui";
 
-// Helper for icons - In a real app, you'd use an icon library like lucide-react
+// Helper for icons
 const Icon = ({ path, className = "w-6 h-6" }) => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className={className}>
     <path d={path} />
   </svg>
 );
 
-// Icon paths from the new UI
+// Icon paths for the new UI
 const ICONS = {
   CHEVRON_DOWN: "M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z",
   MORE_VERTICAL: "M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z",
@@ -20,154 +22,35 @@ const ICONS = {
   SKIP_NEXT: "M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z",
   REPEAT: "M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z",
   CHEVRON_UP: "M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z",
-  LOADING: "M12 2a10 10 0 1 0 10 10h-2a8 8 0 1 1-8-8V2z"
 };
 
+function Player() {
+  // Get state and actions from Zustand stores
+  const { room, currentTrack, playing, playedSeconds, duration, lastPlayer, emitPlay, emitPause, emitSeek, emitNext, setPlaybackState } = useRoomStore();
+  const { loading, setLoading } = useUIStore();
 
-function Player({ track, setCurrentTrack, socket, room, user, loading, setLoading }) {
+  // Local UI state that doesn't need to be global
   const playerRef = useRef(null);
   const [isSeeking, setIsSeeking] = useState(false);
-  const [playing, setPlaying] = useState(false);
-  const [playedSeconds, setPlayedSeconds] = useState(0);
-  const [internalSeek, setInternalSeek] = useState(false);
-  const [lastPlayer, setLastPlayer] = useState(null);
-  const [duration, setDuration] = useState(1);
   const [minimized, setMinimized] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
-
-  // Emit play event
-  const handlePlay = () => {
-    if (!room || !track) return;
-    setLoading(true)
-    socket.emit("play", {
-      roomId: room.id,
-      track,
-      time: playedSeconds,
-      user,
-    });
-    setPlaying(true);
-    setLastPlayer(user);
-  };
-
-  // Emit pause event
-  const handlePause = () => {
-    if (!room || !track) return;
-    socket.emit("pause", {
-      roomId: room.id,
-      time: playedSeconds,
-    });
-    setPlaying(false);
-  };
-
-  // Emit seek event from slider
-  const handleSeekMouseDown = () => {
-    setIsSeeking(true);
-  };
-
-  // As the user drags the slider
-  const handleSeekChange = (newTime) => {
-    // Only update the visual position of the slider
-    setPlayedSeconds(newTime);
-  };
-
-  const handleSeekMouseUp = (newTime) => {
-    if (!room || !track) return;
-
-    // Add this check to prevent the error
-    if (playerRef.current) {
-      playerRef.current.currentTime = Number.parseFloat(newTime);
+  
+  // This effect ensures the underlying ReactPlayer seeks when the server sends a new time
+  useEffect(() => {
+    // FIX: Check if the seekTo function exists before calling it
+    const player = playerRef.current
+    if (useRoomStore.getState().internalSeek && player && player.currentTime !== undefined) {
+      playerRef.current.currentTime = playedSeconds
+      useRoomStore.getState().setInternalSeek(false);
     }
+  }, [playedSeconds]);
 
-    socket.emit("seek", {
-      roomId: room.id,
-      time: newTime,
-    });
-  };
-
-  const handleTimeUpdate = () => {
-    const player = playerRef.current;
-    // We only want to update time slider if we are not currently seeking
-    if (!player || isSeeking) return;
-
-    setPlayedSeconds(player.currentTime)
-
-  }
-
-  const handleDurationChange = () => {
-    const d = playerRef?.current?.duration;
-    const duration = Number.isFinite(d) && d > 0 ? d : 1
-    setDuration(duration)
-  }
-
-
-  // Emit next event
-  const handleNext = () => {
-    if (!room) return;
-    socket.emit("next", {
-      roomId: room.id,
-      user,
-    });
-  };
-
-  // Listen for backend events
+  // Reset local player state when the track changes
   useEffect(() => {
-    if (!socket || !socket.connected) return;
-    const onPlay = ({ track: t, time, user: who }) => {
-      setCurrentTrack(t);
-      setPlaying(true);
-      setLastPlayer(who);
-      setPlayedSeconds(time ?? 0);
-      setInternalSeek(true);
-    };
-    const onPause = ({ time }) => {
-      setPlaying(false);
-      setPlayedSeconds(time ?? 0);
-      setInternalSeek(true);
-    };
-    const onSeek = ({ time }) => {
-      setPlayedSeconds(time ?? 0);
-      setInternalSeek(true);
-    };
-    const onSyncTick = ({ time, isPlaying, currentTrack }) => {
-      console.log("event received")
-      if (track && currentTrack && track.id === currentTrack.id) {
-        if (Math.abs(playedSeconds - time) > 1.5) {
-          setPlayedSeconds(time);
-          setInternalSeek(true);
-        }
-        setPlaying(isPlaying);
-      }
-    };
-
-    socket.on("play", onPlay);
-    socket.on("pause", onPause);
-    socket.on("seek", onSeek);
-    socket.on("syncTick", onSyncTick);
-
-    return () => {
-      socket.off("play", onPlay);
-      socket.off("pause", onPause);
-      socket.off("seek", onSeek);
-      socket.off("syncTick", onSyncTick);
-    };
-  }, [socket, track, setCurrentTrack]);
-
-  // Sync player with state
-  useEffect(() => {
-    // This handles seeks from the server
-    if (internalSeek && playerRef.current) {
-      playerRef.current.currentTime = Number.parseFloat(playedSeconds)
-      setInternalSeek(false);
+    if (currentTrack) {
+        setLoading(true);
     }
-  }, [internalSeek, playedSeconds]);
-
-  // Reset state when track changes
-  useEffect(() => {
-    setPlayedSeconds(0);
-    setDuration(1);
-    setPlaying(true);
-    setLastPlayer(null);
-  }, [track?.id]);
+  }, [currentTrack?.id, setLoading]);
 
   const formatTime = s => {
     if (!Number.isFinite(s)) return "0:00";
@@ -176,7 +59,41 @@ function Player({ track, setCurrentTrack, socket, room, user, loading, setLoadin
     return `${m}:${sec.toString().padStart(2, '0')}`;
   };
 
-  if (!track) {
+  // --- Event Handlers ---
+  const handlePlayPause = () => {
+    // FIX: Check if getCurrentTime function exists before calling it
+    if (playing && playerRef.current && playerRef.current.currentTime !== undefined) {
+      emitPause(playerRef.current.currentTime);
+    } else {
+      emitPlay();
+    }
+  };
+
+  const handleSeekChange = (newTime) => {
+    if (isSeeking) {
+      setPlaybackState({ playedSeconds: newTime });
+    }
+  };
+
+  const handleSeekMouseUp = (newTime) => {
+    setIsSeeking(false);
+    // FIX: Check if seekTo function exists before calling it
+    const player = playerRef.current;
+    if (player && player.currentTime !== undefined) {
+      player.currentTime = newTime;
+      emitSeek(newTime);
+    }
+  };
+
+  const handleTimeUpdate = () => {
+    const player = playerRef.current;
+    // We only want to update time slider if we are not currently seeking
+    if (!player || isSeeking) return;
+
+    setPlaybackState({ playedSeconds: player.currentTime });
+  }
+  
+  if (!currentTrack) {
     return null;
   }
 
@@ -186,101 +103,94 @@ function Player({ track, setCurrentTrack, socket, room, user, loading, setLoadin
   return (
     <>
       <ReactPlayer
+        key={currentTrack.id}
         ref={playerRef}
-        src={track.id ? `https://www.youtube.com/watch?v=${track.id}` : ""}
-        onPlaying={() => setLoading(false)}
+        src={currentTrack.id ? `https://www.youtube.com/watch?v=${currentTrack.id}` : ""}
         playing={playing}
         controls={false}
         width={0}
         height={0}
         style={{ display: "none" }}
-        onDurationChange={handleDurationChange}
+        onReady={() => setLoading(false)}
+        onPlay={() => setPlaybackState({ playing: true })}
+        onPlaying={() => setLoading(false)}
+        onPause={() => setPlaybackState({ playing: false })}
+        onDurationChange={(d) => setPlaybackState({ duration: playerRef.current.duration })}
         onTimeUpdate={handleTimeUpdate}
+        onProgress={() => {setLoading(false)}} // Used to manage buffer duration
         config={{
           youtube: {
             playerVars: {
-              autoplay: 0,
+              autoplay: 1,
               controls: 0,
               rel: 0,
               modestbranding: 1,
-              origin: window.location.origin,
             }
           }
         }}
       />
 
-      {/* Conditionally render the UI based on the 'minimized' state */}
       {minimized ? (
         <div className="fixed bottom-4 right-4 w-64 bg-gray-800 text-white rounded-lg shadow-2xl p-3 flex items-center space-x-3 z-50 animate-fade-in-up">
-          <img src={track.thumbnail} alt={track.title} className="w-12 h-12 rounded-md" />
+          <img src={currentTrack.thumbnail} alt={currentTrack.title} className="w-12 h-12 rounded-md" />
           <div className="flex-1 overflow-hidden">
-            <p className="font-bold truncate text-sm">{track.title}</p>
-            <p className="text-xs text-gray-400 truncate">{track.artist}</p>
+            <p className="font-bold truncate text-sm">{currentTrack.title}</p>
+            <p className="text-xs text-gray-400 truncate">{currentTrack.artist}</p>
           </div>
-          <button onClick={(e) => { e.stopPropagation(); playing ? handlePause() : handlePlay(); }} className="p-2 rounded-full hover:bg-gray-700">
-            {loading ? (
-              <div className="absolute right-4 animate-spin">
-                <div className="w-6 h-6 border-2 border-transparent border-t-green-400 rounded-full"></div>
-              </div>
-            ) : <Icon path={playing ? ICONS.PAUSE : ICONS.PLAY} className="w-5 h-5" />}
+          <button onClick={handlePlayPause} className="p-2 rounded-full hover:bg-gray-700">
+            <Icon path={playing ? ICONS.PAUSE : ICONS.PLAY} className="w-5 h-5" />
           </button>
           <button onClick={() => setMinimized(false)} className="p-2 rounded-full hover:bg-gray-700">
             <Icon path={ICONS.CHEVRON_UP} className="w-5 h-5" />
           </button>
         </div>
       ) : (
-        <div className="fixed inset-0 bg-gradient-to-b from-gray-800 via-gray-900 to-black text-white flex flex-col items-center justify-center p-4 transition-all duration-500">
+        <div className="fixed inset-0 bg-gradient-to-b from-gray-800 via-gray-900 to-black text-white flex flex-col items-center justify-center p-4 transition-all duration-500 z-50">
           <div className="w-full max-w-md mx-auto flex flex-col h-full">
-            {/* Top Bar */}
             <header className="flex justify-between items-center w-full pt-4 pb-2">
               <button onClick={() => setMinimized(true)} className="p-2 rounded-full hover:bg-white/10">
                 <Icon path={ICONS.CHEVRON_DOWN} />
               </button>
               <div className="text-center">
-                <p className="text-xs uppercase tracking-wider text-gray-400">Played {loading} by {lastPlayer}</p>
-                <p className="font-bold text-sm">{room?.name || "SyncPlayer"}</p>
+                <p className="text-xs uppercase tracking-wider text-gray-400">PLAYING IN {room?.id}</p>
+                 {lastPlayer && <p className="font-bold text-sm">Last action by {lastPlayer}</p>}
               </div>
               <button className="p-2 rounded-full hover:bg-white/10">
                 <Icon path={ICONS.MORE_VERTICAL} />
               </button>
             </header>
 
-            {/* Album Art */}
             <div className="flex-grow flex items-center justify-center my-4">
               <img
-                src={track.thumbnail}
-                alt={track.title}
+                src={currentTrack.thumbnail}
+                alt={currentTrack.title}
                 className="w-full aspect-square rounded-lg shadow-2xl object-cover"
               />
             </div>
 
-            {/* Song Info & Like Button */}
             <div className="flex justify-between items-center w-full mb-4">
               <div>
-                <h1 className="text-2xl font-bold truncate max-w-xs">{track.title}</h1>
-                <p className="text-gray-400 truncate max-w-xs">{track.artist}</p>
+                <h1 className="text-2xl font-bold truncate max-w-xs">{currentTrack.title}</h1>
+                <p className="text-gray-400 truncate max-w-xs">{currentTrack.artist}</p>
               </div>
               <button onClick={() => setIsLiked(!isLiked)} className={`p-2 rounded-full hover:bg-white/10 transition-colors ${isLiked ? 'text-green-500' : 'text-gray-400'}`}>
                 <Icon path={ICONS.HEART} className="w-7 h-7" />
               </button>
             </div>
 
-            {/* Progress Bar */}
             <div className="w-full mb-4">
               <input
                 type="range"
                 min={0}
                 max={safeDuration}
                 value={safePlayedSeconds}
+                onMouseDown={() => setIsSeeking(true)}
                 onChange={(e) => handleSeekChange(Number(e.target.value))}
-                onMouseDown={handleSeekMouseDown}
                 onMouseUp={(e) => handleSeekMouseUp(Number(e.target.value))}
-                onTouchStart={handleSeekMouseDown}
+                onTouchStart={() => setIsSeeking(true)}
                 onTouchEnd={(e) => handleSeekMouseUp(Number(e.target.value))}
                 className="w-full h-1 bg-gray-700 rounded-full appearance-none cursor-pointer accent-white"
-                style={{
-                  background: `linear-gradient(to right, white ${(safePlayedSeconds / safeDuration) * 100}%, rgb(55 65 81) ${(safePlayedSeconds / safeDuration) * 100}%)`
-                }}
+                style={{ background: `linear-gradient(to right, white ${(safePlayedSeconds / safeDuration) * 100}%, rgb(55 65 81) ${(safePlayedSeconds / safeDuration) * 100}%)` }}
               />
               <div className="flex justify-between text-xs text-gray-400 mt-1">
                 <span>{formatTime(safePlayedSeconds)}</span>
@@ -288,53 +198,24 @@ function Player({ track, setCurrentTrack, socket, room, user, loading, setLoadin
               </div>
             </div>
 
-            {/* Playback Controls */}
             <div className="flex justify-between items-center w-full mb-8">
-              <button className="p-2 text-green-500 rounded-full hover:bg-white/10">
-                <Icon path={ICONS.SHUFFLE} />
+              <button className="p-2 text-gray-400 rounded-full hover:bg-white/10"><Icon path={ICONS.SHUFFLE} /></button>
+              <button className="p-2 rounded-full hover:bg-white/10"><Icon path={ICONS.SKIP_PREVIOUS} className="w-10 h-10" /></button>
+              <button onClick={handlePlayPause} className="bg-white text-black rounded-full p-4 mx-2 shadow-lg hover:scale-105 transition-transform">
+                {loading ? <div className="w-8 h-8 border-4 border-gray-300 border-t-black rounded-full animate-spin"></div> : <Icon path={playing ? ICONS.PAUSE : ICONS.PLAY} className="w-8 h-8" />}
               </button>
-              <button className="p-2 rounded-full hover:bg-white/10" title="Previous (Not Implemented)">
-                <Icon path={ICONS.SKIP_PREVIOUS} className="w-10 h-10" />
-              </button>
-              <button
-                onClick={playing ? handlePause : handlePlay}
-                className="bg-white text-black rounded-full p-4 mx-2 shadow-lg hover:scale-105 transition-transform"
-              >
-                {loading ? (
-                  <div className="animate-spin">
-                    <div className="w-6 h-6 border-4 border-transparent border-t-green-400 border-r-green-500 rounded-full"></div>
-                  </div>
-                ) : <Icon path={playing ? ICONS.PAUSE : ICONS.PLAY} className="w-8 h-8" />}
-              </button>
-              <button onClick={handleNext} className="p-2 rounded-full hover:bg-white/10" title="Next">
-                <Icon path={ICONS.SKIP_NEXT} className="w-10 h-10" />
-              </button>
-              <button className="p-2 text-green-500 rounded-full hover:bg-white/10">
-                <Icon path={ICONS.REPEAT} />
-              </button>
+              <button onClick={emitNext} className="p-2 rounded-full hover:bg-white/10"><Icon path={ICONS.SKIP_NEXT} className="w-10 h-10" /></button>
+              <button className="p-2 text-gray-400 rounded-full hover:bg-white/10"><Icon path={ICONS.REPEAT} /></button>
             </div>
-
-            {/* Bottom Bar (placeholder) */}
-            <footer className="w-full flex justify-center pb-4">
-              <div className="w-10 h-1 bg-gray-500 rounded-full"></div>
-            </footer>
           </div>
         </div>
       )}
-
-      {/* Styles are also kept at the top level to apply to both views */}
       <style>{`
-        @keyframes fade-in-up {
-          from { opacity: 0; transform: translateY(20px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        .animate-fade-in-up {
-          animation: fade-in-up 0.3s ease-out forwards;
-        }
-        /* Custom styles for the range slider */
+        @keyframes fade-in-up { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-fade-in-up { animation: fade-in-up 0.3s ease-out forwards; }
         input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; background: transparent; }
         input[type=range]:focus { outline: none; }
-        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; height: 12px; width: 12px; background: #fff; border-radius: 50%; cursor: pointer; margin-top: -5px; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; height: 12px; width: 12px; background: #fff; border-radius: 50%; cursor: pointer;  }
         input[type=range]::-moz-range-thumb { height: 12px; width: 12px; background: #fff; border-radius: 50%; cursor: pointer; }
       `}</style>
     </>

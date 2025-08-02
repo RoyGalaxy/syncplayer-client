@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useRoomStore } from "../store/room";
+import { useUIStore } from "../store/ui";
+import { useUserStore } from "../store/user";
 
 // Helper for icons - In a real app, you'd use an icon library like lucide-react
 const Icon = ({ path, className = "w-6 h-6" }) => (
@@ -14,59 +16,41 @@ const ICONS = {
   LEAVE: "M15.28 4.22a.75.75 0 0 1 0 1.06L13.06 7.5l2.22 2.22a.75.75 0 1 1-1.06 1.06L12 8.56l-2.22 2.22a.75.75 0 0 1-1.06-1.06L10.94 7.5 8.72 5.28a.75.75 0 0 1 1.06-1.06L12 6.44l2.22-2.22a.75.75 0 0 1 1.06 0Z M6.25 5.5A2.25 2.25 0 0 0 4 7.75v8.5A2.25 2.25 0 0 0 6.25 18.5h4.5a.75.75 0 0 1 0 1.5h-4.5A3.75 3.75 0 0 1 2.5 16.25v-8.5A3.75 3.75 0 0 1 6.25 4h4.5a.75.75 0 0 1 0 1.5h-4.5Z",
 };
 
-function RoomUI({ socket, room, setRoom, user, setUser }) {
-  const [roomCode, setRoomCode] = useState("");
-  const [username, setUsername] = useState(user || "");
-  const [error, setError] = useState(null);
-  const [joining, setJoining] = useState(false);
-  const [copied, setCopied] = useState(false);
+function RoomUI({ socket }) {
+  // UI State from Zustand Store
+  const { error, joining, copied, setError, flashCopied } = useUIStore();
+
+  // User State from Zustand Store
+  const { user, setUser } = useUserStore();
+
+  // Room State and Actions from Zustand Store
+  const { room, roomCodeInput, setRoomCodeInput, createRoom, joinRoom, leaveRoom } = useRoomStore();
 
   const handleCreate = () => {
-    if (!username.trim()) return setError("Please enter a username.");
-    setError(null);
-    socket.emit("createRoom", username, (roomId) => {
-      const roomObj = { id: roomId, queue: [], participants: [], currentTrack: null };
-      setRoom(roomObj);
-      setUser(username);
-      setRoomCode(roomId);
-      // Save to localStorage
-      localStorage.setItem("syncplayer_room", JSON.stringify(roomObj));
-      localStorage.setItem("syncplayer_user", username);
-      handleJoin(roomId, username);
-    });
+    createRoom(user);
   };
 
-  const handleJoin = (code = roomCode, name = username) => {
-    if (!code.trim() || !name.trim()) return setError("Please enter a room code and username.");
-    setError(null);
-    setJoining(true);
-    socket.emit("joinRoom", { roomId: code, user: name }, (res) => {
-      setJoining(false);
-      if (res?.error) return setError(res.error);
-      const roomObj = { ...res.room, id: code };
-      setRoom(roomObj);
-      setUser(name);
-      setRoomCode(code);
-      // Save to localStorage
-      localStorage.setItem("syncplayer_room", JSON.stringify(roomObj));
-      localStorage.setItem("syncplayer_user", name);
-    });
+  const handleJoin = () => {
+    joinRoom(roomCodeInput, user);
   };
 
   const handleCopyCode = () => {
-    navigator.clipboard.writeText(room.id);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (!room?.id) return;
+    // Using the 'copy' command for broader compatibility in iFrames
+    const textArea = document.createElement("textarea");
+    textArea.value = room.id;
+    document.body.appendChild(textArea);
+    textArea.select();
+    try {
+        document.execCommand('copy');
+        flashCopied();
+    } catch (err) {
+        console.error('Fallback: Oops, unable to copy', err);
+        setError("Failed to copy room code.");
+    }
+    document.body.removeChild(textArea);
   };
-
-  const handleLeaveRoom = () => {
-    setRoom(null);
-    setRoomCode("");
-    // Remove from localStorage
-    localStorage.removeItem("syncplayer_room");
-    // We keep the username
-  };
-
+  
   // --- In-Room View ---
   if (room && room.id) {
     let participantsArr = [];
@@ -90,7 +74,7 @@ function RoomUI({ socket, room, setRoom, user, setUser }) {
               {copied && <span className="text-sm text-green-400">Copied!</span>}
             </div>
           </div>
-          <button onClick={handleLeaveRoom} className="mt-4 md:mt-0 flex items-center gap-2 px-4 py-2 bg-red-600/20 text-red-400 rounded-lg hover:bg-red-600/40 transition-colors">
+          <button onClick={leaveRoom} className="mt-4 md:mt-0 flex items-center gap-2 px-4 py-2 bg-red-600/20 text-red-400 rounded-lg hover:bg-red-600/40 transition-colors">
             <Icon path={ICONS.LEAVE} className="w-5 h-5" />
             Leave Room
           </button>
@@ -152,24 +136,24 @@ function RoomUI({ socket, room, setRoom, user, setUser }) {
           <input
             className="w-full p-3 rounded-md bg-gray-700 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-400 transition-all"
             placeholder="Enter your name"
-            value={username}
-            onChange={e => setUsername(e.target.value)}
+            value={user}
+            onChange={e => setUser(e.target.value)}
           />
           <input
             className="w-full p-3 rounded-md bg-gray-700 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-green-400 transition-all"
             placeholder="Enter Room Code (optional)"
-            value={roomCode}
-            onChange={e => setRoomCode(e.target.value)}
+            value={roomCodeInput}
+            onChange={e => setRoomCodeInput(e.target.value)}
           />
         </div>
 
         <div className="mt-6 space-y-3">
           <button 
             className="w-full bg-green-500 text-black px-4 py-3 rounded-md font-semibold hover:bg-green-600 transition-all transform hover:scale-105" 
-            onClick={() => roomCode ? handleJoin() : handleCreate()}
+            onClick={() => roomCodeInput ? handleJoin() : handleCreate()}
             disabled={joining}
           >
-            {joining ? "Joining..." : (roomCode ? "Join Room" : "Create & Join Room")}
+            {joining ? "Joining..." : (roomCodeInput ? "Join Room" : "Create & Join Room")}
           </button>
         </div>
         <p className="text-xs text-gray-500 mt-6">
